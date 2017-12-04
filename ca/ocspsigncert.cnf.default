@@ -32,4 +32,4 @@ commonName              = <<HOSTNAME>>
 [ v3_req ]
 basicConstraints        = CA:FALSE
 keyUsage                = nonRepudiation, digitalSignature, keyEncipherment
-<<ALT_HOSTNAMES>>
+extendedKeyUsage        = OCSPSigning

@@ -1,4 +1,5 @@
 ca/*
 !ca/caconfig.cnf.default
 !ca/host.cnf.default
+!ca/ocspsigncert.cnf.default
 store/*

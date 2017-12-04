@@ -1,5 +1,12 @@
 ## caman
 
+> ### This is my personal fork of [radiac/caman](https://github.com/radiac/caman) with the following customizations:
+> - Added OpenSSL OCSP-Responder (generate OCSP signing cert with ``./caman newocspsigncert <name>`` and start the responder with ``./caman ocsp <name>``, maybe change the port in the ``caman`` script directly)
+> - Added ``./caman crl`` command to regenerate the CRL
+> - Changed certificate file extensions to Windows default (basically remove ``.pem`` at the end)
+> - If ``ca/password.txt`` exists, the password is read from this file
+> - Add ``subjectAltName`` also for single hostname certificate
+
 A self-signing certificate authority manager - create your own certificate
 authority, and generate and manage SSL certificates using openssl.
 

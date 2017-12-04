@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 #
 # Initialise
@@ -8,6 +8,7 @@ VERSION="0.3.2"
 
 # Settings
 DEBUG=false
+OCSPPORT=8089
 
 # Arguments
 CMD=$1
@@ -40,8 +41,12 @@ function call_openssl {
     # on openssl's password source "fd:0"
     if [[ -z ${CAPASS+x} ]] ; then
         # CAPASS is not set - get password for this certificate authority
-        read -sp "Enter CA password for $CAMANDIR: " CAPASS
-        echo
+		if [[ -f "$CADIR/password.cnf" ]] ; then
+			CAPASS=$(<"$CADIR/password.cnf")
+		else
+			read -sp "Enter CA password for $CAMANDIR: " CAPASS
+			echo
+		fi
     fi
 
     # Run the command or exit on failure
@@ -79,8 +84,18 @@ function generate_crl {
     #   -out "..."          Path to CRL
     #   -config "..."       Path to CA config
     echo "Generating CRL..."
-    call_openssl_ca -gencrl -out "$CADIR/ca.crl.pem" \
+    call_openssl_ca -gencrl -out "$CADIR/ca.crl" \
         -config "$CADIR/caconfig.cnf"
+}
+
+function start_ocsp_responder {	
+	CERTDIR=$(ls -t $HOSTDIR | head -1)
+	CERTDIR=$HOSTDIR/$CERTDIR
+	
+    call_openssl ocsp -CA "$CADIR/ca.crt" -index "$CADIR/index.txt" \
+		-rsigner "$CERTDIR/$HOST.crt" -rkey "$CERTDIR/$HOST.key" \
+		-port $OCSPPORT \
+		-ignore_err
 }
 
 function split_ca {
@@ -103,7 +118,7 @@ function command_init {
     #
 
     # Check for existing CA certificate
-    if [[ -f "$CADIR/ca.crt.pem" ]] ; then
+    if [[ -f "$CADIR/ca.crt" ]] ; then
         echo "Certificate authority already exists"
         exit 1
     fi
@@ -126,7 +141,7 @@ function command_init {
             echo "Root CA has not been configured: $ROOT_CA/$CADIR_NAME/caconfig.cnf"
             exit 1
         fi
-        if [[ ! -f "$ROOT_CA/$CADIR_NAME/ca.crt.pem" ]] ; then
+        if [[ ! -f "$ROOT_CA/$CADIR_NAME/ca.crt" ]] ; then
             echo "Root CA has not been initialised"
             exit 1
         fi
@@ -157,8 +172,8 @@ function command_init {
     #   -out "..."          Path to key
     #   4096                Number of bits
     echo "Generating CA private key..."
-    call_openssl_genrsa -aes256 -out "$CADIR/ca.key.pem" 4096
-    chmod 400 "$CADIR/ca.key.pem"
+    call_openssl_genrsa -aes256 -out "$CADIR/ca.key" 4096
+    chmod 400 "$CADIR/ca.key"
 
     # Different actions depending whether this is a root or intermediate CA
     if [[ $ROOT_CA ]] ; then
@@ -175,7 +190,7 @@ function command_init {
         # No need for CA password here
         echo "Creating CSR for intermediate CA..."
         call_openssl_req -new -sha256 \
-            -key "$CADIR/ca.key.pem" \
+            -key "$CADIR/ca.key" \
             -out "$CADIR/ca.csr" \
             -config "$CADIR/caconfig.cnf" -batch
 
@@ -187,14 +202,14 @@ function command_init {
         # Should be in reverse order (host first, root last)
         # We're instructing to distribute the root CA cert, so no need to put
         # that in the chain
-        if [[ -f "$ROOT_CA/$CADIR_NAME/ca-chain.crt.pem" ]] ; then
+        if [[ -f "$ROOT_CA/$CADIR_NAME/ca-chain.crt" ]] ; then
             # Root CA is actually another intermediate; add us to their chain
-            cat "$CADIR/ca.crt.pem" "$ROOT_CA/$CADIR_NAME/ca-chain.crt.pem" \
-                > "$CADIR/ca-chain.crt.pem" \
+            cat "$CADIR/ca.crt" "$ROOT_CA/$CADIR_NAME/ca-chain.crt" \
+                > "$CADIR/ca-chain.crt" \
                 || exit 1
         else
             # Root CA is the root CA; just use our cert for the chain
-            cp "$CADIR/ca.crt.pem" "$CADIR/ca-chain.crt.pem" || exit 1
+            cp "$CADIR/ca.crt" "$CADIR/ca-chain.crt" || exit 1
         fi
 
     else
@@ -209,8 +224,8 @@ function command_init {
         #   -days $DAYS         Number of days this certificate will be valid
         #   -config "..."       Path to CA config
         echo "Signing CA public certificate..."
-        call_openssl_req -x509 -new -key "$CADIR/ca.key.pem" -days $DAYS \
-            -out "$CADIR/ca.crt.pem" -config "$CADIR/caconfig.cnf"
+        call_openssl_req -x509 -new -key "$CADIR/ca.key" -days $DAYS \
+            -out "$CADIR/ca.crt" -config "$CADIR/caconfig.cnf"
     fi
 
     # Create the CRL
@@ -218,6 +233,13 @@ function command_init {
     generate_crl
 
     echo "Certificate authority created"
+}
+
+function command_newocspsigncert {
+	mkdir "$HOSTDIR" || exit 1
+	cp "$CADIR/ocspsigncert.cnf" "$HOSTDIR/config.cnf"
+    perl -pi -e "s/<<HOSTNAME>>/$HOST/g" "$HOSTDIR/config.cnf"
+	command_sign_host
 }
 
 function command_new {
@@ -240,7 +262,7 @@ function command_new {
             foreach $h (@hosts) {
                 $h = ($h =~ /^\d+(\.\d+){3}+$/ ? "IP:" : "DNS:") . $h;
             }
-            print "subjectAltName = " . join(", ", @hosts) . "\n" if @hosts > 1;
+			print "subjectAltName = " . join(", ", @hosts) . "\n" if @hosts;
         } else {
             print;
         }
@@ -286,7 +308,7 @@ function command_sign_host {
     # No need for CA password here
     echo "Creating CSR and private key..."
     call_openssl req -sha256 \
-        -newkey rsa:2048 -nodes -keyout "$CERTDIR/$HOST.key.pem" \
+        -newkey rsa:2048 -nodes -keyout "$CERTDIR/$HOST.key" \
         -new -out "$CERTDIR/$HOST.csr" \
         -config "$HOSTDIR/config.cnf" -batch
 
@@ -300,24 +322,29 @@ function command_sign_host {
     #   -config "..."       Path to CA config created by ``init``
     echo "Signing the certificate..."
     call_openssl_ca \
-        -in "$CERTDIR/$HOST.csr" -out "$CERTDIR/$HOST.crt.pem" \
+        -in "$CERTDIR/$HOST.csr" -out "$CERTDIR/$HOST.crt" \
         -days $DAYS -notext \
         -config "$CADIR/caconfig.cnf"
 
     # Concat the key and certificate
-    cat "$CERTDIR/$HOST.key.pem" "$CERTDIR/$HOST.crt.pem" \
-        > "$CERTDIR/$HOST.keycrt.pem" \
+    cat "$CERTDIR/$HOST.key" "$CERTDIR/$HOST.crt" \
+        > "$CERTDIR/$HOST.keycrt" \
         || exit 1
+	
+	# Create a .pfx file (with empty password)
+	call_openssl pkcs12 -export -nodes -out "$CERTDIR/$HOST.pfx" -inkey "$CERTDIR/$HOST.key" -in "$CERTDIR/$HOST.crt" -passout pass:
 
     # Create chained certs if this is an intermediate CA
-    if [[ -f "$CADIR/ca-chain.crt.pem" ]] ; then
-        cat "$CERTDIR/$HOST.crt.pem" "$CADIR/ca-chain.crt.pem" \
-            > "$CERTDIR/$HOST.chained.crt.pem" \
+    if [[ -f "$CADIR/ca-chain.crt" ]] ; then
+		cat "$CERTDIR/$HOST.crt" "$CADIR/ca-chain.crt" \
+            > "$CERTDIR/$HOST.chained.crt" \
             || exit 1
 
-        cat "$CERTDIR/$HOST.key.pem" "$CERTDIR/$HOST.chained.crt.pem" \
-            > "$CERTDIR/$HOST.chained.keycrt.pem" \
+        cat "$CERTDIR/$HOST.key" "$CERTDIR/$HOST.chained.crt" \
+            > "$CERTDIR/$HOST.chained.keycrt" \
             || exit 1
+		
+		call_openssl pkcs12 -export -out "$CERTDIR/$HOST.chained.pfx" -inkey "$CERTDIR/$HOST.key" -in "$CERTDIR/$HOST.chained.crt" -passout pass:
     fi
     echo "Certificate generated"
 }
@@ -336,7 +363,7 @@ function command_sign_ca {
         echo "Intermediate CA has not been configured"
         exit 1
     fi
-    if [[ -f "$INTERMEDIATE_CA/$CADIR_NAME/ca.crt.pem" ]] ; then
+    if [[ -f "$INTERMEDIATE_CA/$CADIR_NAME/ca.crt" ]] ; then
         echo "Intermediate CA already exists"
         exit 1
     fi
@@ -363,7 +390,7 @@ function command_sign_ca {
     #   -config "..."       Path to root CA config
     call_openssl_ca \
         -in "$INTERMEDIATE_CA/$CADIR_NAME/ca.csr" \
-        -out "$INTERMEDIATE_CA/$CADIR_NAME/ca.crt.pem" \
+        -out "$INTERMEDIATE_CA/$CADIR_NAME/ca.crt" \
         -days $DAYS -notext \
         -extensions v3_ca \
         -config "$CADIR/caconfig.cnf"
@@ -484,6 +511,21 @@ case "$CMD" in
 
         command_revoke
         command_sign_host
+	
+		;;
+
+	crl)
+		generate_crl
+
+        ;;
+	
+	ocsp)
+		start_ocsp_responder
+
+        ;;
+		
+	newocspsigncert)
+		command_newocspsigncert
 
         ;;
 
@@ -497,6 +539,9 @@ Usage:  caman init [ca:<path/to/root_ca>]
         caman renew <hostname>
         caman revoke <hostname>
         caman revoke ca:<path/to/intermediate_ca>
+		caman crl
+		caman ocsp <signcertname>
+		caman newocspsigncert <name>
 EOF
 
         ;;

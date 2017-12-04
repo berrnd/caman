@@ -14,10 +14,10 @@ default_ca    = CA_default        # The default ca section
 
 database                = $dir/index.txt
 new_certs_dir           = $dir/newcerts
-certificate             = $dir/ca.crt.pem
+certificate             = $dir/ca.crt
 serial                  = $dir/serial
-crl                     = $dir/ca.crl.pem
-private_key             = $dir/ca.key.pem
+crl                     = $dir/ca.crl
+private_key             = $dir/ca.key
 RANDFILE                = $dir/private/.rand
 
 x509_extensions         = usr_cert
@@ -55,7 +55,7 @@ emailAddress            = supplied
 # The default root certificate generation policy
 [ req ]
 default_bits            = 4096
-default_keyfile         = $dir/ca.key.pem
+default_keyfile         = $dir/ca.key
 default_md              = sha256
 prompt                  = no
 distinguished_name      = req_distinguished_name
@@ -84,7 +84,9 @@ nsComment               = "OpenSSL Generated Certificate"
 subjectKeyIdentifier    = hash
 authorityKeyIdentifier  = keyid,issuer
 # >> Change the following URL
-crlDistributionPoints   = URI:http://example.com/ca.crl.pem
+crlDistributionPoints   = URI:http://example.com/ca.crl
+authorityInfoAccess     = caIssuers;URI:http://example.com/ca.crt
+authorityInfoAccess     = OCSP;URI:http://example.com:8089
 # << End changes
 
 ####################################################################
@@ -94,7 +96,9 @@ subjectKeyIdentifier    = hash
 authorityKeyIdentifier  = keyid:always,issuer
 basicConstraints        = CA:true
 # >> Change the following URL
-crlDistributionPoints   = URI:http://example.com/ca.crl.pem
+crlDistributionPoints   = URI:http://example.com/ca.crl
+authorityInfoAccess     = caIssuers;URI:http://example.com/ca.crt
+authorityInfoAccess     = OCSP;URI:http://example.com:8089
 # << End changes
 
 ####################################################################
